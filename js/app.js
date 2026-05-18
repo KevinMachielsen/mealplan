@@ -592,8 +592,7 @@ async function renderRecipeForm(params = {}) {
             <input type="url" class="form-input" id="import-url" placeholder="https://..." style="flex:1">
             <button class="btn btn-outline" id="import-btn">Importeer</button>
           </div>
-          <p class="form-hint">Werkt met lekkerensimpel.nl, chickslovefood.com, leukerecepten.nl en andere sites met recept-data.</p>
-          <div id="scrape-status"></div>
+<div id="scrape-status"></div>
         </div>
         <div style="text-align:center;color:var(--text-secondary);font-size:13px;margin:-4px 0 12px">— of vul handmatig in —</div>` : ''}
 
