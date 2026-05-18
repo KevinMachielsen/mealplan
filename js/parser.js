@@ -1,26 +1,29 @@
 const UNITS = [
-  'kilogram','kg','gram','g','liter','l','milliliter','ml',
+  'kilogram','kg','gram','gr','g','liter','ltr','l','milliliter','ml',
   'eetlepel','el','theelepel','tl','eetlepels','theelepels',
   'kop','kopje','kopjes','cup','cups',
   'stuk','stuks','plak','plakken','teen','teentje','teentjes',
   'blikje','blikjes','blik','bakje','bakjes','zakje','zakjes',
   'flesje','flesjes','potje','potjes','bosje','bosjes',
   'handvol','handje','snuf','snufje','mespuntje','mespunt',
-  'dl','deciliter','cl','centiliter',
-  'pond','ons'
+  'dl','deciliter','cl','centiliter','pond','ons'
 ];
 
 const UNIT_NORM = {
-  'kilogram': 'kg', 'gram': 'g', 'liter': 'l', 'milliliter': 'ml',
+  'kilogram': 'kg',
+  'gram': 'g', 'gr': 'g',
+  'liter': 'l', 'ltr': 'l',
+  'milliliter': 'ml',
   'deciliter': 'dl', 'centiliter': 'cl',
-  'eetlepel': 'el', 'eetlepels': 'el', 'theelepel': 'tl', 'theelepels': 'tl',
+  'eetlepel': 'el', 'eetlepels': 'el',
+  'theelepel': 'tl', 'theelepels': 'tl',
   'kopje': 'kop', 'kopjes': 'kop', 'cups': 'cup',
-  'stuks': 'stuk', 'plakken': 'plak', 'teentje': 'teen', 'teentjes': 'teen',
+  'stuks': 'stuk', 'plakken': 'plak',
+  'teentje': 'teen', 'teentjes': 'teen',
   'blikjes': 'blik', 'bakjes': 'bakje', 'zakjes': 'zakje',
   'flesjes': 'flesje', 'potjes': 'potje', 'bosjes': 'bosje'
 };
 
-// Conversions to a base unit (g for mass, ml for volume)
 const UNIT_TO_ML = { l: 1000, dl: 100, cl: 10, ml: 1, el: 15, tl: 5, kop: 240, cup: 240 };
 const UNIT_TO_G  = { kg: 1000, g: 1, pond: 500, ons: 100 };
 
@@ -31,26 +34,18 @@ const UNICODE_FRACTIONS = {
 };
 
 function parseAmount(str) {
-  str = str.trim();
+  str = str.trim().replace(',', '.');
   if (!str) return null;
-
   // "2-3" → average
-  const rangeMatch = str.match(/^(\d+(?:[.,]\d+)?)\s*[-–]\s*(\d+(?:[.,]\d+)?)$/);
-  if (rangeMatch) {
-    return (parseFloat(rangeMatch[1].replace(',', '.')) + parseFloat(rangeMatch[2].replace(',', '.'))) / 2;
-  }
-
-  // "2 1/2" → 2.5
-  const mixedMatch = str.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)$/);
-  if (mixedMatch) {
-    return parseInt(mixedMatch[1]) + parseInt(mixedMatch[2]) / parseInt(mixedMatch[3]);
-  }
-
-  // "1/2" → 0.5
-  const fracMatch = str.match(/^(\d+)\s*\/\s*(\d+)$/);
-  if (fracMatch) return parseInt(fracMatch[1]) / parseInt(fracMatch[2]);
-
-  return parseFloat(str.replace(',', '.')) || null;
+  const range = str.match(/^(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)$/);
+  if (range) return (parseFloat(range[1]) + parseFloat(range[2])) / 2;
+  // "2 1/2"
+  const mixed = str.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)$/);
+  if (mixed) return parseInt(mixed[1]) + parseInt(mixed[2]) / parseInt(mixed[3]);
+  // "1/2"
+  const frac = str.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (frac) return parseInt(frac[1]) / parseInt(frac[2]);
+  return parseFloat(str) || null;
 }
 
 function normalizeUnit(unit) {
@@ -65,6 +60,30 @@ function normalizeIngredientName(name) {
     .trim();
 }
 
+// Strips common Dutch plural suffixes for smarter ingredient matching
+function stemName(name) {
+  const n = normalizeIngredientName(name);
+  if (n.endsWith('tjes')) return n.slice(0, -4) + 'tje';
+  if (n.endsWith('jes'))  return n.slice(0, -3) + 'je';
+  if (n.endsWith('ies'))  return n.slice(0, -3) + 'ie';
+  if (n.endsWith('eren')) return n.slice(0, -4);   // eieren → ei
+  if (n.endsWith('eren')) return n.slice(0, -4);
+  if (n.endsWith('aten')) return n.slice(0, -4) + 'aat'; // tomaten → tomaat
+  if (n.endsWith('elen')) return n.slice(0, -4) + 'el';  // wortelen → wortel
+  if (n.endsWith('olen')) return n.slice(0, -4) + 'ol';
+  if (n.endsWith('alen')) return n.slice(0, -4) + 'aal';
+  if (n.endsWith('en'))   return n.slice(0, -2);   // uien → ui, filets → filet (handled below)
+  if (n.endsWith('s'))    return n.slice(0, -1);   // courgettes → courgette
+  return n;
+}
+
+function namesMatch(a, b) {
+  const na = normalizeIngredientName(a);
+  const nb = normalizeIngredientName(b);
+  if (na === nb) return true;
+  return stemName(na) === stemName(nb);
+}
+
 function parseIngredientText(text) {
   if (!text || typeof text !== 'string') return { amount: null, unit: '', name: text || '', raw: text };
 
@@ -75,11 +94,12 @@ function parseIngredientText(text) {
     str = str.replace(new RegExp(frac, 'g'), val + ' ');
   }
 
-  // Strip leading bullet / dash
+  // Strip leading bullet/dash
   str = str.replace(/^[-•·]\s*/, '');
 
-  // Try to match amount (with optional fraction) at start
-  const amountPattern = /^(\d+(?:[.,]\d+)?(?:\s*[-–]\s*\d+(?:[.,]\d+)?)?(?:\s+\d+\s*\/\s*\d+)?|\d+\s*\/\s*\d+|\d+(?:[.,]\d+)?)/;
+  // Amount regex: fractions first so "1/2" isn't stolen by plain "1"
+  // Order: "2 1/2" → "1/2" → "2-3" → "2.5" → "2"
+  const amountPattern = /^(\d+\s+\d+\s*\/\s*\d+|\d+\s*\/\s*\d+|\d+(?:[.,]\d+)?(?:\s*[-–]\s*\d+(?:[.,]\d+)?)?)/;
   const amountMatch = str.match(amountPattern);
 
   let amount = null;
@@ -90,10 +110,10 @@ function parseIngredientText(text) {
     amount = parseAmount(amountMatch[1]);
     let rest = str.slice(amountMatch[1].length).trim();
 
-    // Check for unit
+    // Match unit (longest first to avoid 'g' matching before 'gr')
     const sortedUnits = [...UNITS].sort((a, b) => b.length - a.length);
     for (const u of sortedUnits) {
-      const re = new RegExp(`^${u}(?:\\.)?(?=\\s|$)`, 'i');
+      const re = new RegExp(`^${u}\\.?(?=\\s|$)`, 'i');
       if (re.test(rest)) {
         unit = normalizeUnit(u);
         rest = rest.replace(re, '').trim();
@@ -104,9 +124,9 @@ function parseIngredientText(text) {
     name = rest;
   }
 
-  // Strip parenthetical notes from name but keep them accessible
+  // Strip parenthetical notes and anything after comma
   name = name.replace(/\s*\(.*?\)\s*/g, ' ').trim();
-  name = name.replace(/,.*$/, '').trim(); // strip after comma
+  name = name.replace(/,.*$/, '').trim();
 
   return { amount, unit, name: name || str, raw: text };
 }
@@ -116,69 +136,55 @@ function formatAmount(amount, unit) {
   let num;
   if (Math.abs(amount - Math.round(amount)) < 0.01) {
     num = Math.round(amount).toString();
-  } else if (Math.abs(amount * 4 - Math.round(amount * 4)) < 0.01) {
-    // Quarter-fractions
-    const quarters = { 0.25: '¼', 0.5: '½', 0.75: '¾', 1.25: '1¼', 1.5: '1½', 1.75: '1¾' };
-    num = quarters[amount] || amount.toFixed(1);
   } else {
-    num = parseFloat(amount.toFixed(2)).toString();
+    const quarters = { 0.25: '¼', 0.5: '½', 0.75: '¾', 1.25: '1¼', 1.5: '1½', 1.75: '1¾', 2.5: '2½', 3.5: '3½' };
+    num = quarters[amount] !== undefined ? quarters[amount] : parseFloat(amount.toFixed(2)).toString();
   }
   return unit ? `${num} ${unit}` : num;
 }
 
 // ─── Ingredient aggregation ──────────────────────────────────────────────────
 function aggregateIngredients(ingredientArrays) {
-  // ingredientArrays: array of ingredient arrays (one per recipe)
-  const map = new Map();
+  const list = [];
 
   for (const ingredients of ingredientArrays) {
     for (const ing of ingredients) {
-      const parsed = typeof ing === 'string' ? parseIngredientText(ing) : ing;
-      const nameKey = normalizeIngredientName(parsed.name || parsed.raw || '');
-      if (!nameKey) continue;
+      const parsed = typeof ing === 'string' ? parseIngredientText(ing) : { ...ing };
+      const ingName = normalizeIngredientName(parsed.name || parsed.raw || '');
+      if (!ingName) continue;
 
-      // Try to merge with same name + compatible units
-      let merged = false;
-      for (const [key, existing] of map.entries()) {
-        if (normalizeIngredientName(existing.name) !== nameKey) continue;
+      // Try to find an existing entry with a matching name
+      const existing = list.find(e => namesMatch(e.name, ingName));
 
-        // Same unit or both null
+      if (existing) {
+        // Same or convertible unit → add amounts
         if (existing.unit === (parsed.unit || '')) {
           existing.amount = (existing.amount || 0) + (parsed.amount || 0);
           existing.count = (existing.count || 1) + 1;
-          merged = true;
-          break;
+          continue;
         }
-
-        // Try volume conversion
-        const baseExist = UNIT_TO_ML[existing.unit];
-        const baseParsed = UNIT_TO_ML[parsed.unit || ''];
-        if (baseExist && baseParsed) {
-          existing.amount = ((existing.amount || 0) * baseExist + (parsed.amount || 0) * baseParsed) / baseExist;
+        // Volume conversion
+        const evml = UNIT_TO_ML[existing.unit], pvml = UNIT_TO_ML[parsed.unit || ''];
+        if (evml && pvml) {
+          existing.amount = ((existing.amount || 0) * evml + (parsed.amount || 0) * pvml) / evml;
           existing.count = (existing.count || 1) + 1;
-          merged = true;
-          break;
+          continue;
         }
-
-        // Try mass conversion
-        const massExist = UNIT_TO_G[existing.unit];
-        const massParsed = UNIT_TO_G[parsed.unit || ''];
-        if (massExist && massParsed) {
-          existing.amount = ((existing.amount || 0) * massExist + (parsed.amount || 0) * massParsed) / massExist;
+        // Mass conversion
+        const evg = UNIT_TO_G[existing.unit], pvg = UNIT_TO_G[parsed.unit || ''];
+        if (evg && pvg) {
+          existing.amount = ((existing.amount || 0) * evg + (parsed.amount || 0) * pvg) / evg;
           existing.count = (existing.count || 1) + 1;
-          merged = true;
-          break;
+          continue;
         }
+        // Incompatible units: append separate entry
       }
 
-      if (!merged) {
-        const key = `${nameKey}|${parsed.unit || ''}|${map.size}`;
-        map.set(key, { ...parsed, name: parsed.name || parsed.raw, count: 1 });
-      }
+      list.push({ ...parsed, name: parsed.name || parsed.raw, count: 1 });
     }
   }
 
-  return Array.from(map.values());
+  return list;
 }
 
 // ─── Recipe coverage vs pantry ───────────────────────────────────────────────
@@ -187,11 +193,8 @@ function calculateCoverage(recipe, pantry) {
   let covered = 0;
   for (const ing of recipe.ingredients) {
     const parsed = typeof ing === 'string' ? parseIngredientText(ing) : ing;
-    const ingName = normalizeIngredientName(parsed.name || parsed.raw || '');
-    const found = pantry.some(p => {
-      const pName = normalizeIngredientName(p.name);
-      return pName === ingName || pName.includes(ingName) || ingName.includes(pName);
-    });
+    const ingName = parsed.name || parsed.raw || '';
+    const found = pantry.some(p => namesMatch(p.name, ingName));
     if (found) covered++;
   }
   return Math.round((covered / recipe.ingredients.length) * 100);
