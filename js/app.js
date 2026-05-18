@@ -804,6 +804,9 @@ function openAddRecipeModal() {
 async function renderWeekMenu() {
   document.getElementById('page-title').textContent = 'Weekmenu';
   document.getElementById('header-actions').innerHTML = `
+    <button class="icon-btn" id="shuffle-week-btn" title="Vul week met random recepten">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/></svg>
+    </button>
     <button class="icon-btn" id="gen-shopping-btn" title="Maak boodschappenlijst">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
     </button>`;
@@ -869,7 +872,8 @@ async function renderWeekMenu() {
     </div>
     <div class="week-days">${daysHtml}</div>
     <div class="week-actions">
-      <button class="btn btn-outline btn-full" id="auto-plan-btn">✨ Automatisch plannen</button>
+      <button class="btn btn-secondary" style="flex:1" id="clear-week-btn">🗑 Leegmaken</button>
+      <button class="btn btn-primary" style="flex:2" id="auto-plan-btn">🎲 Vul week willekeurig</button>
     </div>`;
 
   document.getElementById('prev-week').addEventListener('click', () => {
@@ -907,7 +911,16 @@ async function renderWeekMenu() {
     });
   });
 
-  document.getElementById('auto-plan-btn').addEventListener('click', openAutoPlanModal);
+  document.getElementById('auto-plan-btn').addEventListener('click', () => fillWeekRandom(false));
+  document.getElementById('shuffle-week-btn').addEventListener('click', () => fillWeekRandom(false));
+
+  document.getElementById('clear-week-btn').addEventListener('click', async () => {
+    const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+    days.forEach(d => { plan.days[d] = []; });
+    state.mealplan = plan;
+    await DB.saveMealPlan(plan);
+    renderWeekMenu();
+  });
 
   document.getElementById('gen-shopping-btn').addEventListener('click', () => {
     navigate('shopping');
@@ -974,56 +987,28 @@ function openPickRecipeForDay(day) {
   attachPickEvents();
 }
 
-function openAutoPlanModal() {
+async function fillWeekRandom(onlyEmpty = false) {
+  if (state.recipes.length === 0) { showToast('Voeg eerst recepten toe', 'error'); return; }
+
   const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-  const dayLabels = { mon: 'Ma', tue: 'Di', wed: 'Wo', thu: 'Do', fri: 'Vr', sat: 'Za', sun: 'Zo' };
-  let selectedDays = new Set(['mon', 'tue', 'wed', 'thu', 'fri']);
+  const plan = state.mealplan || await DB.getMealPlan(weekKey(state.weekStart));
 
-  function buildContent() {
-    return `
-      <p style="color:var(--text-secondary);font-size:14px;margin-bottom:16px">Kies op welke dagen je wil plannen. De app kiest willekeurig recepten uit je bibliotheek.</p>
-      <label class="form-label">Dagen</label>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
-        ${days.map(d => `<button class="btn btn-sm ${selectedDays.has(d) ? 'btn-primary' : 'btn-secondary'} day-toggle" data-day="${d}">${dayLabels[d]}</button>`).join('')}
-      </div>
-      <button class="btn btn-primary btn-full" id="do-auto-plan">Plannen</button>`;
-  }
+  // Shuffle recipes; if we have ≥7 avoid repeats, otherwise allow wrap-around
+  const shuffled = [...state.recipes].sort(() => Math.random() - 0.5);
+  let pool = [...shuffled];
+  let filled = 0;
 
-  Modal.open('Automatisch plannen', buildContent());
-
-  document.querySelectorAll('.day-toggle').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const day = btn.dataset.day;
-      if (selectedDays.has(day)) selectedDays.delete(day);
-      else selectedDays.add(day);
-      document.getElementById('modal-body').innerHTML = buildContent();
-      document.querySelectorAll('.day-toggle').forEach(b => {
-        b.addEventListener('click', arguments.callee);
-      });
-      document.getElementById('do-auto-plan').addEventListener('click', doAutoPlan);
-    });
+  days.forEach(day => {
+    if (onlyEmpty && plan.days[day]?.length > 0) return;
+    if (pool.length === 0) pool = [...shuffled]; // refill if fewer than 7 recipes
+    plan.days[day] = [pool.shift().id];
+    filled++;
   });
 
-  document.getElementById('do-auto-plan').addEventListener('click', doAutoPlan);
-
-  async function doAutoPlan() {
-    if (state.recipes.length === 0) { showToast('Geen recepten beschikbaar', 'error'); return; }
-    const plan = state.mealplan || await DB.getMealPlan(weekKey(state.weekStart));
-    const shuffled = [...state.recipes].sort(() => Math.random() - 0.5);
-    const daysList = [...selectedDays];
-    daysList.forEach((day, i) => {
-      if (!plan.days[day]) plan.days[day] = [];
-      if (plan.days[day].length === 0) {
-        const recipe = shuffled[i % shuffled.length];
-        plan.days[day].push(recipe.id);
-      }
-    });
-    state.mealplan = plan;
-    await DB.saveMealPlan(plan);
-    Modal.close();
-    showToast('Weekmenu automatisch gepland', 'success');
-    renderWeekMenu();
-  }
+  state.mealplan = plan;
+  await DB.saveMealPlan(plan);
+  showToast(`${filled} dagen gevuld met willekeurige recepten`, 'success');
+  renderWeekMenu();
 }
 
 // ─── Shopping List View ───────────────────────────────────────────────────────
