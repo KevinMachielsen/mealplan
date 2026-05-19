@@ -277,32 +277,39 @@ const TextParser = {
     for (const line of allLines) {
       if (this.SKIP.some(p => p.test(line))) continue;
 
-      const lower = line.toLowerCase().trim().replace(/:$/, '');
+      // Strip leading checkbox/bullet characters (▢□◻ etc.) before processing
+      const clean = this._cleanLine(line);
+      if (!clean) continue;
+
+      const lower = clean.toLowerCase().trim().replace(/:$/, '');
 
       if (this.INGREDIENT_HEADERS.includes(lower)) { section = 'ingredients'; continue; }
       if (this.INSTRUCTION_HEADERS.includes(lower)) { section = 'instructions'; continue; }
 
       // Metadata — scan regardless of section
       if (!servings) {
-        const m = line.match(/(\d+)\s*(?:personen|porties|persons?|servings?)/i);
-        if (m) servings = parseInt(m[1]);
+        const m = clean.match(/^(\d+)\s*(?:personen|porties|persons?|servings?)/i);
+        if (m) { servings = parseInt(m[1]); if (section === 'ingredients') continue; }
       }
       if (!prepTime) {
-        const m = line.match(/(?:voorbereid|prep)[^\d]*(\d+)\s*min/i);
+        const m = clean.match(/(?:voorbereid|prep)[^\d]*(\d+)\s*min/i);
         if (m) prepTime = parseInt(m[1]);
       }
       if (!cookTime) {
-        const m = line.match(/(?:bereid|kook|bak|totaal|total|oven)[^\d]*(\d+)\s*min/i);
+        const m = clean.match(/(?:bereid|kook|bak|totaal|total|oven)[^\d]*(\d+)\s*min/i);
         if (m) cookTime = parseInt(m[1]);
       }
 
       if (section === 'preamble') {
-        preamble.push(line);
+        preamble.push(clean);
       } else if (section === 'ingredients') {
-        if (this._isIngredient(line)) ingredients.push(line);
-        // Sub-header like "Voor de saus:" — skip silently
+        // In the ingredients section accept everything that isn't a sub-header
+        // Sub-headers typically end with ":" and have no amount
+        if (clean.endsWith(':') && !/^\d/.test(clean)) continue;
+        if (clean.length > 100) continue;
+        ingredients.push(clean);
       } else if (section === 'instructions') {
-        const step = line.replace(/^(?:stap\s*)?\d+[.)]\s*/i, '').trim();
+        const step = clean.replace(/^(?:stap\s*)?\d+[.)]\s*/i, '').trim();
         if (step.length > 10) instructions.push(step);
       }
     }
@@ -311,10 +318,12 @@ const TextParser = {
     if (ingredients.length === 0 && instructions.length === 0) {
       for (const line of allLines) {
         if (this.SKIP.some(p => p.test(line))) continue;
-        if (this._isIngredient(line)) {
-          ingredients.push(line);
+        const clean = this._cleanLine(line);
+        if (!clean) continue;
+        if (this._isIngredient(clean)) {
+          ingredients.push(clean);
         } else {
-          const step = line.replace(/^(?:stap\s*)?\d+[.)]\s*/i, '').trim();
+          const step = clean.replace(/^(?:stap\s*)?\d+[.)]\s*/i, '').trim();
           if (step.length > 25) instructions.push(step);
         }
       }
@@ -332,6 +341,11 @@ const TextParser = {
       instructions,
       tags: []
     };
+  },
+
+  _cleanLine(line) {
+    // Strip leading checkbox/bullet/square symbols used by recipe sites (▢□◻ etc.)
+    return line.replace(/^[\s■-◿☐-☒✔✘•·\-–]\s*/u, '').trim();
   },
 
   _isIngredient(line) {

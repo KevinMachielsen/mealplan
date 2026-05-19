@@ -1,5 +1,6 @@
 const UNITS = [
   'kilogram','kg','gram','gr','g','liter','ltr','l','milliliter','ml',
+  'centimeter','cm',
   'eetlepel','el','theelepel','tl','eetlepels','theelepels',
   'kop','kopje','kopjes','cup','cups',
   'stuk','stuks','plak','plakken','teen','teentje','teentjes',
@@ -13,6 +14,7 @@ const UNIT_NORM = {
   'kilogram': 'kg',
   'gram': 'g', 'gr': 'g',
   'liter': 'l', 'ltr': 'l',
+  'centimeter': 'cm',
   'milliliter': 'ml',
   'deciliter': 'dl', 'centiliter': 'cl',
   'eetlepel': 'el', 'eetlepels': 'el',
@@ -94,8 +96,8 @@ function parseIngredientText(text) {
     str = str.replace(new RegExp(frac, 'g'), val + ' ');
   }
 
-  // Strip leading bullet/dash
-  str = str.replace(/^[-•·]\s*/, '');
+  // Strip leading decorative characters (bullets, checkboxes like ▢□◻, dashes)
+  str = str.replace(/^[\s■-◿☐-☒✔✘•·\-–]\s*/u, '');
 
   // Amount regex: fractions first so "1/2" isn't stolen by plain "1"
   // Order: "2 1/2" → "1/2" → "2-3" → "2.5" → "2"
