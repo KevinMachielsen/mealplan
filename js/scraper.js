@@ -243,3 +243,124 @@ const Scraper = {
       .trim();
   }
 };
+
+// ─── Text paste parser ────────────────────────────────────────────────────────
+const TextParser = {
+  INGREDIENT_HEADERS: [
+    'ingrediënten','ingredienten','ingrediënten:','ingredienten:',
+    'benodigdheden','wat heb je nodig','nodig:','ingredients','you\'ll need','you will need'
+  ],
+  INSTRUCTION_HEADERS: [
+    'bereiding','bereiding:','bereidingswijze','bereidingswijze:','werkwijze','werkwijze:',
+    'instructies','instructies:','bereidingsstappen','stappen','zo maak je dit',
+    'zo maak je het','zo bereid je het','directions','instructions','method','how to'
+  ],
+  SKIP: [
+    /^(print|afdrukken|delen|share|bewaar|pin it|tweet|saved?)/i,
+    /^(reacties?|comments?|laat een reactie|leave a comment)/i,
+    /^(gerelateerde?|verwante?|related|meer recepten|more recipes)/i,
+    /^(home|menu|zoeken|search|navigation|nav)\b/i,
+    /^(copyright|©|\d{4}\s+©)/i,
+    /^https?:\/\//i,
+    /^[★☆✓•→←\-_=]{3,}$/,   // decoration lines
+  ],
+
+  parse(rawText) {
+    const allLines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 1);
+
+    let section = 'preamble';
+    const preamble = [];
+    const ingredients = [];
+    const instructions = [];
+    let servings = 0, prepTime = 0, cookTime = 0;
+
+    for (const line of allLines) {
+      if (this.SKIP.some(p => p.test(line))) continue;
+
+      const lower = line.toLowerCase().trim().replace(/:$/, '');
+
+      if (this.INGREDIENT_HEADERS.includes(lower)) { section = 'ingredients'; continue; }
+      if (this.INSTRUCTION_HEADERS.includes(lower)) { section = 'instructions'; continue; }
+
+      // Metadata — scan regardless of section
+      if (!servings) {
+        const m = line.match(/(\d+)\s*(?:personen|porties|persons?|servings?)/i);
+        if (m) servings = parseInt(m[1]);
+      }
+      if (!prepTime) {
+        const m = line.match(/(?:voorbereid|prep)[^\d]*(\d+)\s*min/i);
+        if (m) prepTime = parseInt(m[1]);
+      }
+      if (!cookTime) {
+        const m = line.match(/(?:bereid|kook|bak|totaal|total|oven)[^\d]*(\d+)\s*min/i);
+        if (m) cookTime = parseInt(m[1]);
+      }
+
+      if (section === 'preamble') {
+        preamble.push(line);
+      } else if (section === 'ingredients') {
+        if (this._isIngredient(line)) ingredients.push(line);
+        // Sub-header like "Voor de saus:" — skip silently
+      } else if (section === 'instructions') {
+        const step = line.replace(/^(?:stap\s*)?\d+[.)]\s*/i, '').trim();
+        if (step.length > 10) instructions.push(step);
+      }
+    }
+
+    // No headers found → use heuristics on all lines
+    if (ingredients.length === 0 && instructions.length === 0) {
+      for (const line of allLines) {
+        if (this.SKIP.some(p => p.test(line))) continue;
+        if (this._isIngredient(line)) {
+          ingredients.push(line);
+        } else {
+          const step = line.replace(/^(?:stap\s*)?\d+[.)]\s*/i, '').trim();
+          if (step.length > 25) instructions.push(step);
+        }
+      }
+    }
+
+    return {
+      name: this._extractName(preamble),
+      description: '',
+      image: '',
+      source: '',
+      prepTime,
+      cookTime,
+      servings: servings || 4,
+      ingredients,
+      instructions,
+      tags: []
+    };
+  },
+
+  _isIngredient(line) {
+    if (line.length > 120) return false;
+    // Starts with digit or unicode fraction
+    if (/^[\d½¼¾⅓⅔⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞]/.test(line)) return true;
+    // Contains "Xunit" pattern like "200gram" or "3 el"
+    return /\d+\s*(?:gram|gr|kg|ml|liter|ltr|eetlepel|theelepel|\bel\b|\btl\b|kop|stuks?|blik)/i.test(line);
+  },
+
+  _extractName(preambleLines) {
+    // Single common nav/ui words to skip entirely
+    const NAV_WORDS = new Set([
+      'home','menu','zoeken','search','recepten','recipes','recept','recipe',
+      'soepen','vlees','pasta','vegetarisch','desserts','ontbijt','lunch','diner',
+      'afdrukken','print','delen','share','bewaar','opslaan','favoriet',
+      'inloggen','registreren','abonneren','subscribe','nieuwsbrief',
+    ]);
+
+    for (const line of preambleLines) {
+      if (line.length < 4 || line.length > 90) continue;
+      if (/^\d/.test(line)) continue;
+      if (/min(uten)?|personen|porties|bereid/i.test(line)) continue;
+      // Skip if the whole line (lowercase) is a single nav word
+      if (NAV_WORDS.has(line.toLowerCase().trim())) continue;
+      // Skip if it looks like a breadcrumb category (single word, no spaces, all lowercase or title case)
+      if (!/\s/.test(line) && line.length < 20) continue;
+      return line;
+    }
+    return '';
+  }
+};

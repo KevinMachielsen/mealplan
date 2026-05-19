@@ -587,12 +587,26 @@ async function renderRecipeForm(params = {}) {
       <div style="padding:12px 12px 120px">
         ${!isEdit ? `
         <div class="form-group">
-          <label class="form-label">Importeer van website</label>
-          <div style="display:flex;gap:8px">
-            <input type="url" class="form-input" id="import-url" placeholder="https://..." style="flex:1">
-            <button class="btn btn-outline" id="import-btn">Importeer</button>
+          <label class="form-label">Importeer</label>
+          <div class="tabs" style="margin-bottom:12px">
+            <button class="tab active" id="tab-url">Van website</button>
+            <button class="tab" id="tab-text">Tekst plakken</button>
           </div>
-<div id="scrape-status"></div>
+
+          <div id="import-url-panel">
+            <div style="display:flex;gap:8px">
+              <input type="url" class="form-input" id="import-url" placeholder="https://..." style="flex:1">
+              <button class="btn btn-outline" id="import-btn">Importeer</button>
+            </div>
+            <div id="scrape-status"></div>
+          </div>
+
+          <div id="import-text-panel" class="hidden">
+            <textarea class="form-textarea" id="paste-text" rows="9"
+              placeholder="Kopieer alle tekst van de receptenpagina (Ctrl+A, Ctrl+C) en plak die hier..."></textarea>
+            <button class="btn btn-outline btn-full" id="parse-text-btn" style="margin-top:8px">Analyseer tekst</button>
+            <div id="parse-status"></div>
+          </div>
         </div>
         <div style="text-align:center;color:var(--text-secondary);font-size:13px;margin:-4px 0 12px">— of vul handmatig in —</div>` : ''}
 
@@ -677,6 +691,20 @@ async function renderRecipeForm(params = {}) {
       buildForm();
     });
 
+    // Tab switching
+    document.getElementById('tab-url')?.addEventListener('click', () => {
+      document.getElementById('tab-url').classList.add('active');
+      document.getElementById('tab-text').classList.remove('active');
+      document.getElementById('import-url-panel').classList.remove('hidden');
+      document.getElementById('import-text-panel').classList.add('hidden');
+    });
+    document.getElementById('tab-text')?.addEventListener('click', () => {
+      document.getElementById('tab-text').classList.add('active');
+      document.getElementById('tab-url').classList.remove('active');
+      document.getElementById('import-text-panel').classList.remove('hidden');
+      document.getElementById('import-url-panel').classList.add('hidden');
+    });
+
     // URL import
     document.getElementById('import-btn')?.addEventListener('click', async () => {
       const url = document.getElementById('import-url').value.trim();
@@ -702,6 +730,32 @@ async function renderRecipeForm(params = {}) {
       } catch (e) {
         statusEl.innerHTML = `<div class="scraper-status error">✗ ${escapeHtml(e.message)}</div>`;
       }
+    });
+
+    // Text paste import
+    document.getElementById('parse-text-btn')?.addEventListener('click', () => {
+      const text = document.getElementById('paste-text').value.trim();
+      const statusEl = document.getElementById('parse-status');
+      if (!text) { statusEl.innerHTML = '<div class="scraper-status error">Plak eerst tekst in het veld.</div>'; return; }
+
+      const data = TextParser.parse(text);
+      const ingCount = data.ingredients.length;
+      const stepCount = data.instructions.length;
+
+      if (!data.name && ingCount === 0 && stepCount === 0) {
+        statusEl.innerHTML = '<div class="scraper-status error">Kon geen recept herkennen in deze tekst. Probeer meer tekst te plakken, inclusief de koppen "Ingrediënten" en "Bereiding".</div>';
+        return;
+      }
+
+      defaultRecipe.name = data.name || defaultRecipe.name;
+      defaultRecipe.prepTime = data.prepTime || defaultRecipe.prepTime;
+      defaultRecipe.cookTime = data.cookTime || defaultRecipe.cookTime;
+      defaultRecipe.servings = data.servings || defaultRecipe.servings;
+      currentIngredients = ingCount ? data.ingredients : currentIngredients;
+      currentInstructions = stepCount ? data.instructions : currentInstructions;
+
+      statusEl.innerHTML = `<div class="scraper-status success">✓ Gevonden: ${ingCount} ingrediënten, ${stepCount} stappen${data.name ? ` — "${escapeHtml(data.name)}"` : ''}. Controleer het resultaat hieronder.</div>`;
+      buildForm();
     });
 
     // Delete ingredient
